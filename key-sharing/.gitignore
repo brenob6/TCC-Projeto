@@ -1,0 +1,11 @@
+# Binários compilados para as máquinas Vagrant
+build/
+
+# Estado local do Vagrant
+.vagrant/
+
+# Material gerado em execução: chaves públicas, prontuários e bases locais
+keys/
+*.enc
+decifrado_*
+*.db

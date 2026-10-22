@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package custodian.v1;
+
+option go_package = "poc-key-sharing/pb;pb";
+
+// CustodianService expõe as operações de um Custodiante de Chaves.
+//
+// Cada custodiante armazena apenas um compartilhamento (share) da chave
+// criptográfica do paciente, gerado pelo esquema Shamir Secret Sharing.
+// O KMS é o único cliente deste serviço.
+service CustodianService {
+  // StoreShare persiste um compartilhamento sob custódia do custodiante.
+  rpc StoreShare(StoreShareRequest) returns (StoreShareResponse);
+
+  // PartialDecrypt executa a decifração parcial D_i = C1^{x_i} usando o
+  // share local. O share jamais é transmitido pela rede, garantindo que a
+  // chave privada não seja reconstituída em nenhuma entidade.
+  rpc PartialDecrypt(PartialDecryptRequest) returns (PartialDecryptResponse);
+
+  // Health informa o estado do custodiante e quantos shares ele mantém.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message StoreShareRequest {
+  // Identificador do paciente dono da chave.
+  string key_id = 1;
+  // Índice do compartilhamento no esquema (k,n).
+  int32 share_index = 2;
+  // Valor do compartilhamento (escalar Ed25519 serializado).
+  bytes share_value = 3;
+}
+
+message StoreShareResponse {
+  string custodian_id = 1;
+  bool stored = 2;
+}
+
+message PartialDecryptRequest {
+  string key_id = 1;
+  // Ponto efêmero C1 = g^r do cabeçalho do prontuário cifrado.
+  bytes c1 = 2;
+  // Registro de auditoria: identifica quem autorizou a operação.
+  AuditContext audit = 3;
+}
+
+message PartialDecryptResponse {
+  string custodian_id = 1;
+  // Índice do share utilizado, necessário à interpolação de Lagrange.
+  int32 share_index = 2;
+  // Decifração parcial D_i = C1^{x_i} (ponto Ed25519 serializado).
+  bytes partial = 3;
+}
+
+// AuditContext carrega os dados que o custodiante registra localmente a cada
+// operação de decifração parcial, atendendo aos requisitos de auditabilidade.
+message AuditContext {
+  // Profissional de saúde que solicitou o acesso.
+  string requester_id = 1;
+  // Instituição de origem da solicitação.
+  string institution_id = 2;
+  // Indica acesso emergencial (recuperação extraordinária).
+  bool emergency = 3;
+  // Justificativa, obrigatória no acesso emergencial.
+  string reason = 4;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string custodian_id = 1;
+  int32 share_count = 2;
+}

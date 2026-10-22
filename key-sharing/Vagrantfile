@@ -1,0 +1,50 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/ubuntu-24.04"
+
+  config.vm.provider :virtualbox do |vb|
+    vb.memory = "1024"
+    vb.cpus = 1
+
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+  end
+
+  config.vm.synced_folder ".", "/vagrant"
+
+  # Custodiantes de Chaves: cada um armazena um compartilhamento (share) da
+  # chave do paciente e expõe a interface gRPC consumida pelo KMS.
+  nodes = [
+    { name: "custodian-1", ip: "192.168.56.21" },
+    { name: "custodian-2", ip: "192.168.56.22" },
+    { name: "custodian-3", ip: "192.168.56.23" }
+  ]
+
+  nodes.each do |node|
+    config.vm.define node[:name] do |machine|
+      machine.vm.hostname = node[:name]
+
+      machine.vm.network "private_network", ip: node[:ip]
+
+      machine.vm.provision "shell",
+        path: "scripts/provision.sh",
+        args: [node[:name]]
+    end
+  end
+
+  # Máquina do KMS: gera as chaves, distribui os shares entre os custodiantes
+  # e coordena a recuperação dos prontuários.
+  config.vm.define "kms" do |machine|
+    machine.vm.hostname = "kms"
+
+    machine.vm.network "private_network", ip: "192.168.56.20"
+
+    machine.vm.provision "shell",
+      path: "scripts/provision-kms.sh"
+
+    machine.vm.provision "shell",
+      path: "scripts/test.sh",
+      run: "never",
+      name: "test",
+      privileged: false
+  end
+end
