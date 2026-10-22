@@ -1,0 +1,39 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/ubuntu-24.04"
+
+  config.vm.provider :virtualbox do |vb|
+    vb.memory = "1536"
+    vb.cpus = 1
+
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+  end
+
+  config.vm.synced_folder ".", "/vagrant"
+
+  # Cada máquina representa uma instituição de saúde e executa o peer da sua
+  # organização (OrgN) e um dos três orderers Raft do serviço de ordenação.
+  nodes = [
+    { name: "fabric-node-1", ip: "192.168.56.31", index: 1 },
+    { name: "fabric-node-2", ip: "192.168.56.32", index: 2 },
+    { name: "fabric-node-3", ip: "192.168.56.33", index: 3 }
+  ]
+
+  nodes.each do |node|
+    config.vm.define node[:name] do |machine|
+      machine.vm.hostname = node[:name]
+
+      machine.vm.network "private_network", ip: node[:ip]
+
+      machine.vm.provision "shell",
+        path: "scripts/provision.sh",
+        args: [node[:index]]
+
+      machine.vm.provision "shell",
+        path: "scripts/channel.sh",
+        run: "never",
+        name: "channel",
+        privileged: false
+    end
+  end
+end

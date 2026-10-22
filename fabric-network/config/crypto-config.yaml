@@ -1,0 +1,48 @@
+# Material criptográfico da rede (gerado pelo cryptogen no host).
+#
+# Cada instituição de saúde é uma organização com um peer próprio. O serviço de
+# ordenação é composto por três orderers Raft, um em cada máquina, todos da
+# organização OrdererOrg.
+#
+# Os IPs são incluídos como SANs para que os certificados TLS também sejam
+# válidos quando os nós forem acessados diretamente pelo endereço.
+
+OrdererOrgs:
+  - Name: Orderer
+    Domain: example.com
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: orderer1
+        SANS: ["localhost", "127.0.0.1", "192.168.56.31"]
+      - Hostname: orderer2
+        SANS: ["localhost", "127.0.0.1", "192.168.56.32"]
+      - Hostname: orderer3
+        SANS: ["localhost", "127.0.0.1", "192.168.56.33"]
+
+PeerOrgs:
+  - Name: Org1
+    Domain: org1.example.com
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: peer0
+        SANS: ["localhost", "127.0.0.1", "192.168.56.31"]
+    Users:
+      Count: 1
+
+  - Name: Org2
+    Domain: org2.example.com
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: peer0
+        SANS: ["localhost", "127.0.0.1", "192.168.56.32"]
+    Users:
+      Count: 1
+
+  - Name: Org3
+    Domain: org3.example.com
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: peer0
+        SANS: ["localhost", "127.0.0.1", "192.168.56.33"]
+    Users:
+      Count: 1
