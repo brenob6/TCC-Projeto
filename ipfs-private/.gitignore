@@ -1,0 +1,17 @@
+# Estado interno do Vagrant (inclui chaves SSH privadas das VMs)
+.vagrant/
+*.log
+
+# Material sensível da rede privada
+swarm.key
+
+# Artefatos gerados automaticamente
+downloads/
+peers/
+
+# Arquivos de editor e sistema operacional
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
