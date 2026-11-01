@@ -15,3 +15,6 @@ channel-artifacts/
 *.swp
 *~
 .DS_Store
+
+# Artefatos do chaincode copiados pelos scripts de ../prontuarios-cc/scripts/vagrant
+chaincode/
