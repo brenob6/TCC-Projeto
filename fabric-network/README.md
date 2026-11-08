@@ -3,7 +3,8 @@
 Infraestrutura da rede *blockchain* descrita na proposta (seção *Rede
 Blockchain*), referente ao item de *backlog* **B-01**: três máquinas Vagrant,
 uma por instituição de saúde, executando o Hyperledger Fabric `2.5.16` (LTS)
-com ordenação Raft e um canal compartilhado.
+com ordenação Raft e um canal compartilhado. Cada máquina executa também o nó
+IPFS da instituição (B-06), provisionado com os scripts de `../ipfs-private`.
 
 Esta etapa cobre **somente o setup da rede**. Nenhum *chaincode* é instalado e
 nenhuma transação é submetida; os contratos B-02 a B-05 serão implantados
@@ -19,7 +20,8 @@ sobre esta infraestrutura.
 
 Portas adicionais em cada máquina: `7053` (Admin API do orderer, *channel
 participation*), `7052` (chaincode), `9443` e `9444` (*operations*/métricas do
-orderer e do peer).
+orderer e do peer) e, do nó IPFS, `4001` (*swarm*), `5001` (API) e `8080`
+(*gateway*).
 
 - **Organizações:** `Org1MSP`, `Org2MSP` e `Org3MSP` representam as
   instituições; `OrdererMSP` agrupa os três orderers.
@@ -31,8 +33,9 @@ orderer e do peer).
   autenticação mútua.
 - **Ledger:** LevelDB (padrão do peer).
 
-Cada VM usa a box `bento/ubuntu-24.04` com 1,5 GB de RAM e 1 vCPU, em uma rede
-`private_network` do VirtualBox. Os nós executam os binários nativos do Fabric
+Cada VM usa a box `bento/ubuntu-24.04` com 2 GB de RAM e 1 vCPU, em uma rede
+`private_network` do VirtualBox. O diretório `../ipfs-private` é montado em
+`/ipfs-private`, com o Kubo, a `swarm.key` e os Peer IDs dos nós. Os nós executam os binários nativos do Fabric
 como serviços systemd, sem Docker; os *chaincodes* serão executados como
 serviço externo (*chaincode-as-a-service*), cujo *builder* já está instalado em
 `/opt/hyperledger/ccaas_builder`.
@@ -51,14 +54,16 @@ serviço externo (*chaincode-as-a-service*), cujo *builder* já está instalado 
 ./scripts/start.sh
 ```
 
-O script baixa os binários (se necessário), gera os artefatos, sobe as VMs e
-cria o canal. Equivale a:
+O script baixa os binários (se necessário), gera os artefatos, sobe as VMs,
+cria o canal e interliga os nós IPFS. Equivale a:
 
 ```bash
-./download-fabric.sh                           # uma única vez
-./scripts/generate.sh                          # material criptográfico e bloco gênese
-vagrant up                                     # orderer + peer em cada máquina
-vagrant provision --provision-with=channel     # ingresso no canal
+./download-fabric.sh                               # uma única vez
+../ipfs-private/scripts/prepare.sh                 # Kubo e swarm.key (uma única vez)
+./scripts/generate.sh                              # material criptográfico e bloco gênese
+vagrant up                                         # orderer, peer e nó IPFS em cada máquina
+vagrant provision --provision-with=channel         # ingresso no canal
+vagrant provision --provision-with=ipfs-bootstrap  # malha da rede IPFS privada
 ```
 
 Para verificar o estado da rede:
@@ -75,7 +80,7 @@ Resultado esperado: os três orderers com `"consensusRelation": "consenter"` e
 
 | Arquivo | Descrição |
 |---------|-----------|
-| `Vagrantfile` | Define as três VMs e os provisionadores: `provision.sh` (executado no `vagrant up`) e `channel` (`channel.sh`, `run: "never"`, executado sob demanda). |
+| `Vagrantfile` | Define as três VMs e os provisionadores: `provision.sh` e `ipfs` (`../ipfs-private/scripts/provision.sh`), executados no `vagrant up`, e `channel` (`channel.sh`) e `ipfs-bootstrap` (`../ipfs-private/scripts/bootstrap.sh`), com `run: "never"`, executados sob demanda. |
 | `download-fabric.sh` | Baixa o Fabric `v2.5.16` (linux-amd64) para `downloads/fabric.tar.gz`. |
 | `config/crypto-config.yaml` | Organizações e nós para o `cryptogen`, com os IPs incluídos como SANs dos certificados. |
 | `config/configtx.yaml` | Organizações, políticas, consentidores Raft e o perfil `ProntuariosChannel`. |
@@ -106,9 +111,10 @@ osnadmin channel list -o $ORDERER_ADMIN_ADDRESS --ca-file $ORDERER_CA \
 Serviços e dados:
 
 ```bash
-sudo systemctl status fabric-orderer fabric-peer
+sudo systemctl status fabric-orderer fabric-peer ipfs
 sudo journalctl -u fabric-orderer -u fabric-peer -f
 ls /var/hyperledger/production/{orderer,peer}
+ipfs swarm peers                                   # os outros dois nós IPFS
 ```
 
 ## Observações

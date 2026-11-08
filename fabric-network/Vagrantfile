@@ -2,7 +2,7 @@ Vagrant.configure("2") do |config|
   config.vm.box = "bento/ubuntu-24.04"
 
   config.vm.provider :virtualbox do |vb|
-    vb.memory = "1536"
+    vb.memory = "2048"
     vb.cpus = 1
 
     vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
@@ -10,9 +10,12 @@ Vagrant.configure("2") do |config|
   end
 
   config.vm.synced_folder ".", "/vagrant"
+  # Kubo, swarm.key e Peer IDs da rede IPFS privada (../ipfs-private).
+  config.vm.synced_folder "../ipfs-private", "/ipfs-private"
 
   # Cada máquina representa uma instituição de saúde e executa o peer da sua
-  # organização (OrgN) e um dos três orderers Raft do serviço de ordenação.
+  # organização (OrgN), um dos três orderers Raft do serviço de ordenação e o
+  # nó IPFS da instituição.
   nodes = [
     { name: "fabric-node-1", ip: "192.168.56.31", index: 1 },
     { name: "fabric-node-2", ip: "192.168.56.32", index: 2 },
@@ -34,6 +37,15 @@ Vagrant.configure("2") do |config|
         run: "never",
         name: "channel",
         privileged: false
+
+      machine.vm.provision "shell",
+        path: "../ipfs-private/scripts/provision.sh",
+        name: "ipfs"
+
+      machine.vm.provision "shell",
+        path: "../ipfs-private/scripts/bootstrap.sh",
+        run: "never",
+        name: "ipfs-bootstrap"
     end
   end
 end

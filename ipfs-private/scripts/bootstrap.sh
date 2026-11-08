@@ -4,29 +4,33 @@ set -e
 
 IPFS_USER=vagrant
 
+# Diretório ipfs-private do host, montado pelo Vagrantfile de ../fabric-network.
+SHARE=/ipfs-private
+
 HOSTNAME=$(hostname)
 
+# Os IPs repetem os definidos no Vagrantfile de ../fabric-network.
 declare -A IPS=(
-    ["ipfs-node-1"]="192.168.56.11"
-    ["ipfs-node-2"]="192.168.56.12"
-    ["ipfs-node-3"]="192.168.56.13"
+    ["fabric-node-1"]="192.168.56.31"
+    ["fabric-node-2"]="192.168.56.32"
+    ["fabric-node-3"]="192.168.56.33"
 )
 
 echo "Aguardando todos os Peer IDs..."
 
-while [ "$(find /vagrant/peers -name '*.peer' | wc -l)" -lt 3 ]; do
-    sleep 2
+for NODE in "${!IPS[@]}"; do
+    while [ ! -s ${SHARE}/peers/${NODE}.peer ]; do
+        sleep 2
+    done
 done
 
 echo "Removendo bootstraps..."
 sudo -u ${IPFS_USER} ipfs bootstrap rm --all >/dev/null 2>&1 || true
 
-for FILE in /vagrant/peers/*.peer
+for NODE in "${!IPS[@]}"
 do
-    NODE=$(basename "$FILE" .peer)
-
     if [ "$NODE" != "$HOSTNAME" ]; then
-        PEER=$(cat "$FILE")
+        PEER=$(cat ${SHARE}/peers/${NODE}.peer)
         IP=${IPS[$NODE]}
 
         echo "Adicionando $NODE"

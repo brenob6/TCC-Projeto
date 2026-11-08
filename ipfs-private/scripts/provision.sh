@@ -4,13 +4,16 @@ set -e
 
 IPFS_USER=vagrant
 
+# Diretório ipfs-private do host, montado pelo Vagrantfile de ../fabric-network.
+SHARE=/ipfs-private
+
 echo "Updating system packages..."
 sudo apt update -y
 
 
 if ! command -v ipfs >/dev/null 2>&1; then
 		echo "IPFS is not installed. Installing IPFS..."
-		cp /vagrant/downloads/kubo.tar.gz .
+		cp ${SHARE}/downloads/kubo.tar.gz .
 		tar -xvzf kubo.tar.gz
 		
 		cd kubo
@@ -28,7 +31,7 @@ fi
 
 ipfs bootstrap rm --all
 
-cp /vagrant/swarm.key \$IPFS_PATH/swarm.key
+cp ${SHARE}/swarm.key \$IPFS_PATH/swarm.key
 
 chmod 600 \$IPFS_PATH/swarm.key
 
@@ -71,9 +74,9 @@ echo "Peer ID:"
 sudo -u ${IPFS_USER} ipfs id
 echo "======================================"
 
-mkdir -p /vagrant/peers
+mkdir -p ${SHARE}/peers
 
 HOSTNAME=$(hostname)
 PEER_ID=$(sudo -u ${IPFS_USER} ipfs id -f="<id>")
 
-echo "$PEER_ID" > /vagrant/peers/${HOSTNAME}.peer
+echo "$PEER_ID" > ${SHARE}/peers/${HOSTNAME}.peer
