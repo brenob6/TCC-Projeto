@@ -95,7 +95,8 @@ provisionador nomeado (`test`) com `run: "never"`, executado apenas sob demanda.
 
 ## Ambiente de testes
 
-O ambiente Vagrant reproduz quatro máquinas em rede privada:
+O ambiente Vagrant reproduz quatro máquinas em rede privada, com 512 MB de RAM
+cada:
 
 | Máquina | Endereço | Papel |
 | --- | --- | --- |
