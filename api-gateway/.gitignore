@@ -1,0 +1,8 @@
+# Binário compilado
+build/
+
+# Diretório off-chain da demonstração (nomes de pacientes e profissionais)
+data/
+
+# Configuração local
+config.json

@@ -1,0 +1,8 @@
+{
+  "listen": "127.0.0.1:8080",
+  "channel": "prontuarios",
+  "chaincode": "prontuarios",
+  "custodians": ["192.168.56.21:50051", "192.168.56.22:50051", "192.168.56.23:50051"],
+  "threshold": 2,
+  "directoryFile": "data/directory.json"
+}
