@@ -34,6 +34,7 @@ Consequências:
 | `internal/kms` | Cliente que coordena os custodiantes |
 | `cmd/custodian` | Binário do Custodiante de Chaves |
 | `cmd/kms` | Interface de linha de comando do KMS |
+| `kmsclient` | Reexporta o KMS para módulos externos, como `../api-gateway` |
 
 O esquema criptográfico reaproveita o utilizado em `../kms`, aqui distribuído
 entre serviços independentes.
