@@ -271,30 +271,72 @@ fi
 
 ensure_reachable ${ROOT}/fabric-network 5001 "${FABRIC_NODES[@]}"
 
-# Garante a malha entre os nós (necessária para que uma instituição leia um
-# envelope adicionado pelo nó de outra) e confere a conexão de cada nó com os
-# outros dois.
 ipfs_api() {
-    curl -fsS -m 10 -X POST "http://$1:5001/api/v0/$2"
+    curl -fsS -m 15 -X POST "http://$1:5001/api/v0/$2"
 }
+
+# Máquinas provisionadas antes da configuração de Peering.Peers e do Bitswap
+# (ipfs-private/scripts/bootstrap.sh) recebem o provisionador novamente.
+for entry in "${FABRIC_NODES[@]}"; do
+    if ! ipfs_api ${entry##*:} "config?arg=Internal.Bitswap.BroadcastControl.Enable" | grep -q '"Value":false'; then
+        echo "Atualizando a configuração dos nós IPFS..."
+        vagrant provision --provision-with=ipfs-bootstrap
+        ensure_reachable ${ROOT}/fabric-network 5001 "${FABRIC_NODES[@]}"
+        break
+    fi
+done
+
+# Confere a troca de blocos entre cada par de nós, necessária para que uma
+# instituição leia um envelope adicionado pelo nó de outra. A conexão pode
+# existir sem que o Bitswap a utilize (por exemplo, após a reativação da rede
+# host-only); nesse caso, o par é desconectado e reconectado por um único lado,
+# como no Peering.Peers.
 declare -A PEER_IDS
 for entry in "${FABRIC_NODES[@]}"; do
     ip=${entry##*:}
     PEER_IDS[${ip}]=$(ipfs_api ${ip} id | sed -n 's/.*"ID":"\([^"]*\)".*/\1/p')
     [ -n "${PEER_IDS[${ip}]}" ] || fail "não foi possível obter o Peer ID do IPFS em ${entry%%:*}."
 done
-for entry in "${FABRIC_NODES[@]}"; do
-    ip=${entry##*:}
-    connected=0
-    for other in "${!PEER_IDS[@]}"; do
-        [ "${other}" = "${ip}" ] && continue
-        if ipfs_api ${ip} "swarm/connect?arg=/ip4/${other}/tcp/4001/p2p/${PEER_IDS[${other}]}" >/dev/null; then
-            connected=$((connected + 1))
+
+# ipfs_transfer <origem> <destino>: verdadeiro se o destino obtém, pela rede, um
+# bloco adicionado (sem fixação) na origem.
+ipfs_transfer() {
+    local cid
+    cid=$(echo "teste-${RANDOM}-$(date +%s%N)" \
+        | curl -fsS -m 10 -X POST -F "file=@-;filename=teste" "http://$1:5001/api/v0/add?pin=false&cid-version=1" \
+        | sed -n 's/.*"Hash":"\([^"]*\)".*/\1/p')
+    [ -n "${cid}" ] && ipfs_api $2 "cat?arg=${cid}&timeout=10s" >/dev/null 2>&1
+}
+
+failed=0
+for a in "${FABRIC_NODES[@]}"; do
+    for b in "${FABRIC_NODES[@]}"; do
+        # Cada par uma vez, com a conexão aberta pelo nó de índice maior.
+        [[ "${a%%:*}" < "${b%%:*}" ]] || continue
+        low=${a##*:}
+        high=${b##*:}
+        ok=0
+        for attempt in 1 2 3; do
+            if ipfs_transfer ${low} ${high} && ipfs_transfer ${high} ${low}; then
+                ok=1
+                break
+            fi
+            echo "${a%%:*} <-> ${b%%:*}: troca de blocos falhou; reconectando..."
+            ipfs_api ${low} "swarm/disconnect?arg=/p2p/${PEER_IDS[${high}]}" >/dev/null 2>&1 || true
+            ipfs_api ${high} "swarm/disconnect?arg=/p2p/${PEER_IDS[${low}]}" >/dev/null 2>&1 || true
+            sleep 2
+            ipfs_api ${high} "swarm/connect?arg=/ip4/${low}/tcp/4001/p2p/${PEER_IDS[${low}]}" >/dev/null 2>&1 || true
+            sleep 3
+        done
+        if [ ${ok} -eq 1 ]; then
+            echo "${a%%:*} <-> ${b%%:*}: IPFS troca blocos nos dois sentidos."
+        else
+            echo "AVISO: os nós IPFS de ${a%%:*} e ${b%%:*} não trocam blocos."
+            failed=1
         fi
     done
-    echo "${entry%%:*}: IPFS conectado a ${connected} de 2 nós."
-    [ ${connected} -eq 2 ] || echo "AVISO: o nó IPFS de ${entry%%:*} não se conectou a todos os demais."
 done
+[ ${failed} -eq 0 ] || echo "AVISO: prontuários adicionados por uma instituição podem não ser lidos pelas demais."
 
 # ------------------------------------------------------------------------------
 step "3/4 Frontend (frontend)"

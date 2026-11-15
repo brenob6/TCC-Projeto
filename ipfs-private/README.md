@@ -41,8 +41,8 @@ vagrant ssh fabric-node-1 -c "ipfs swarm peers"
 |---------|-----------|
 | `download-ipfs.sh` | Baixa o Kubo `v0.42.0` (linux-amd64) para `downloads/kubo.tar.gz`. O download é feito no host para que as VMs não precisem baixar o binário individualmente. |
 | `scripts/prepare.sh` | Executado no host antes de subir as máquinas. Executa `download-ipfs.sh`, se necessário, e gera a `swarm.key`, caso ainda não exista. |
-| `scripts/provision.sh` | Provisionador `ipfs`, executado em cada máquina no `vagrant up`. Atualiza os pacotes, instala o Kubo a partir de `/ipfs-private/downloads/kubo.tar.gz` (se ainda não estiver instalado), executa `ipfs init`, remove os bootstrap peers públicos, copia a `swarm.key`, expõe API e gateway em `0.0.0.0`, desativa o `AutoConf` e cria/ativa o serviço systemd `ipfs`. Ao final, grava o Peer ID do nó em `peers/<hostname>.peer`. |
-| `scripts/bootstrap.sh` | Provisionador `ipfs-bootstrap` (`run: "never"`), executado após o provisionamento das três máquinas. Aguarda os Peer IDs dos três nós, remove todos os bootstrap peers e adiciona como bootstrap os outros dois nós (`/ip4/<ip>/tcp/4001/p2p/<peer-id>`). Por fim, lista os peers conectados com `ipfs swarm peers`. |
+| `scripts/provision.sh` | Provisionador `ipfs`, executado em cada máquina no `vagrant up`. Atualiza os pacotes, instala o Kubo a partir de `/ipfs-private/downloads/kubo.tar.gz` (se ainda não estiver instalado), executa `ipfs init`, remove os bootstrap peers públicos, copia a `swarm.key`, expõe API e gateway em `0.0.0.0`, desativa o `AutoConf`, o mDNS e o controle de difusão do Bitswap (`Internal.Bitswap.BroadcastControl`) e cria/ativa o serviço systemd `ipfs`. Ao final, grava o Peer ID do nó em `peers/<hostname>.peer`. |
+| `scripts/bootstrap.sh` | Provisionador `ipfs-bootstrap` (`run: "never"`), executado após o provisionamento das três máquinas. Aguarda os Peer IDs dos três nós, remove todos os bootstrap peers e configura em `Peering.Peers` os nós de índice menor, de modo que cada par seja conectado por um único lado. Reaplica as opções de Bitswap e mDNS, reinicia o daemon e lista os peers conectados com `ipfs swarm peers`. |
 | `swarm.key` | Gerado. Chave pré-compartilhada da rede privada. Todos os nós precisam da mesma chave para se comunicar. |
 | `peers/` | Gerado. Contém o Peer ID de cada nó, usado pelo `bootstrap.sh` para montar a lista de bootstrap. |
 | `downloads/` | Gerado pelo `download-ipfs.sh`. Contém o tarball do Kubo. |
@@ -55,7 +55,7 @@ vagrant ssh fabric-node-1 -c "ipfs swarm peers"
 3. Cada nó inicia o daemon IPFS com a `swarm.key` e publica seu Peer ID em
    `peers/`.
 4. `vagrant provision --provision-with=ipfs-bootstrap` configura, em cada nó,
-   os demais nós como bootstrap peers.
+   a conexão permanente (`Peering.Peers`) com os nós de índice menor.
 
 ## Observações
 
@@ -65,3 +65,10 @@ vagrant ssh fabric-node-1 -c "ipfs swarm peers"
   sobrescritos no novo provisionamento.
 - Os IPs dos nós estão definidos no `Vagrantfile` de `../fabric-network` e no
   `bootstrap.sh`. Ao alterar a topologia, atualize os dois arquivos.
+- No Kubo 0.42, quando dois nós se conectam pelos dois lados ao mesmo tempo, o
+  fechamento da conexão duplicada faz o Bitswap deixar de enviar pedidos ao
+  peer, embora a conexão restante continue ativa: o nó não obtém blocos do
+  outro e a leitura termina em `context deadline exceeded`. O `Peering.Peers`
+  em um único sentido reduz a ocorrência, mas conexões abertas pelo DHT ainda
+  podem causá-la. Por isso, o `start.sh` da raiz testa a troca de blocos entre
+  cada par e reconecta os pares que falharem.

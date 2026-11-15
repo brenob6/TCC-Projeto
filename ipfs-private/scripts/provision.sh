@@ -39,6 +39,13 @@ ipfs config Addresses.API "/ip4/0.0.0.0/tcp/5001"
 ipfs config Addresses.Gateway "/ip4/0.0.0.0/tcp/8080"
 ipfs config AutoConf.Enabled false --json
 
+# A partir do Kubo 0.36, o Bitswap envia pedidos apenas a parte dos peers
+# conectados; na rede privada, todos os nós devem recebê-los. O mDNS é
+# desativado porque os peers são conhecidos (bootstrap.sh) e a descoberta
+# simultânea gera conexões duplicadas.
+ipfs config Internal.Bitswap.BroadcastControl.Enable false --json
+ipfs config Discovery.MDNS.Enabled false --json
+
 EOF
 
 cat > /etc/systemd/system/ipfs.service <<EOF

@@ -27,17 +27,34 @@ done
 echo "Removendo bootstraps..."
 sudo -u ${IPFS_USER} ipfs bootstrap rm --all >/dev/null 2>&1 || true
 
+# Cada nó mantém conexão (Peering.Peers) apenas com os nós de índice menor, de
+# modo que cada par é conectado por um único lado. Conexões abertas pelos dois
+# lados ao mesmo tempo são duplicadas e, ao fechar a excedente, o Bitswap deixa
+# de enviar pedidos ao peer, embora a conexão restante continue ativa.
+PEERING=""
 for NODE in "${!IPS[@]}"
 do
-    if [ "$NODE" != "$HOSTNAME" ]; then
+    if [ "${NODE##*-}" -lt "${HOSTNAME##*-}" ]; then
         PEER=$(cat ${SHARE}/peers/${NODE}.peer)
         IP=${IPS[$NODE]}
 
         echo "Adicionando $NODE"
 
-        sudo -u ${IPFS_USER} ipfs bootstrap add \
-            /ip4/$IP/tcp/4001/p2p/$PEER
+        PEERING="${PEERING:+${PEERING},}{\"ID\":\"${PEER}\",\"Addrs\":[\"/ip4/${IP}/tcp/4001\"]}"
     fi
+done
+
+sudo -u ${IPFS_USER} ipfs config Peering.Peers "[${PEERING}]" --json
+
+# Repetidos de provision.sh para as máquinas provisionadas antes da mudança.
+sudo -u ${IPFS_USER} ipfs config Internal.Bitswap.BroadcastControl.Enable false --json
+sudo -u ${IPFS_USER} ipfs config Discovery.MDNS.Enabled false --json
+
+systemctl restart ipfs
+
+# 'ipfs id' também responde com o daemon parado; 'swarm peers' exige o daemon.
+until sudo -u ${IPFS_USER} ipfs swarm peers >/dev/null 2>&1; do
+    sleep 1
 done
 
 sudo -u ${IPFS_USER} ipfs swarm peers
