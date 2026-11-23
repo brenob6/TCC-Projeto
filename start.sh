@@ -3,9 +3,10 @@
 # Sobe todos os módulos da prova de conceito e deixa o frontend disponível
 # para testes em http://127.0.0.1:8080:
 #
-#   1. custodiantes de chaves          (key-sharing, 3 máquinas)
-#   2. instituições: rede Fabric, nós IPFS e chaincode
+#   1. instituições: rede Fabric, nós IPFS e chaincode
 #                                      (fabric-network + ipfs-private + prontuarios-cc, 3 máquinas)
+#   2. custodiantes de chaves          (key-sharing, 3 máquinas), que confirmam
+#                                      cada decifração no livro-razão
 #   3. frontend compilado              (frontend/dist)
 #   4. API Gateway em segundo plano    (api-gateway, servindo também o frontend)
 #
@@ -200,22 +201,7 @@ if [ ${needed} -gt ${available} ]; then
 fi
 
 # ------------------------------------------------------------------------------
-step "1/4 Custodiantes de chaves (key-sharing)"
-# ------------------------------------------------------------------------------
-
-cd ${ROOT}/key-sharing
-
-# A API Gateway coordena os custodiantes diretamente (kmsclient); a máquina
-# kms, usada apenas nos testes do módulo, não é necessária.
-./scripts/build.sh
-# O provisionamento reinstala o binário recém-compilado e reinicia o serviço;
-# a base de compartilhamentos é preservada.
-vagrant up --provision custodian-1 custodian-2 custodian-3
-
-ensure_reachable ${ROOT}/key-sharing 50051 "${CUSTODIANS[@]}"
-
-# ------------------------------------------------------------------------------
-step "2/4 Instituições: rede Fabric, nós IPFS e chaincode (fabric-network + ipfs-private + prontuarios-cc)"
+step "1/4 Instituições: rede Fabric, nós IPFS e chaincode (fabric-network + ipfs-private + prontuarios-cc)"
 # ------------------------------------------------------------------------------
 
 cd ${ROOT}/fabric-network
@@ -228,6 +214,10 @@ if any_not_created ${ROOT}/fabric-network; then
 elif [ ! -d organizations ] || [ ! -f channel-artifacts/prontuarios.block ]; then
     fail "as máquinas Fabric existem, mas organizations/ ou channel-artifacts/ não.
 Recrie a rede: cd fabric-network && vagrant destroy -f && rm -rf organizations channel-artifacts"
+else
+    # Acrescenta as identidades dos custodiantes (User2) a redes criadas antes
+    # delas, sem alterar o material existente.
+    ./scripts/generate.sh
 fi
 
 # Subshell: lib.sh redefine ROOT (diretório prontuarios-cc) e outras variáveis.
@@ -339,6 +329,26 @@ done
 [ ${failed} -eq 0 ] || echo "AVISO: prontuários adicionados por uma instituição podem não ser lidos pelas demais."
 
 # ------------------------------------------------------------------------------
+step "2/4 Custodiantes de chaves (key-sharing)"
+# ------------------------------------------------------------------------------
+
+cd ${ROOT}/key-sharing
+
+# A API Gateway coordena os custodiantes diretamente (kmsclient); a máquina
+# kms, usada apenas nos testes do módulo, não é necessária.
+./scripts/build.sh
+# Certificados do TLS mútuo entre o coordenador (API) e os custodiantes.
+./scripts/gen-tls.sh
+# Conexão de cada custodiante com o peer de uma organização, usada para
+# confirmar no livro-razão cada autorização de decifração.
+./scripts/ledger-config.sh ${ROOT}/fabric-network/organizations
+# O provisionamento reinstala o binário recém-compilado e reinicia o serviço
+# no modo livro-razao; a base de compartilhamentos é preservada.
+CUSTODIAN_MODE=livro-razao vagrant up --provision custodian-1 custodian-2 custodian-3
+
+ensure_reachable ${ROOT}/key-sharing 50051 "${CUSTODIANS[@]}"
+
+# ------------------------------------------------------------------------------
 step "3/4 Frontend (frontend)"
 # ------------------------------------------------------------------------------
 
@@ -406,14 +416,19 @@ if command -v jq >/dev/null 2>&1; then
     problems=$(echo "${health}" | jq '
         [.orgs[] | .fabric, .ipfs | select(startswith("ok") | not)] +
         [.custodians[] | .status | select(startswith("ativo") | not)] | length')
+    isolated=$(echo "${health}" | jq '[.custodians[] | .status | select(contains("modo isolado"))] | length')
 else
     echo "${health}"
     problems=$(echo "${health}" | grep -c "sem resposta\|indisponível" || true)
+    isolated=$(echo "${health}" | grep -o "modo isolado" | wc -l)
 fi
 
 echo ""
 if [ "${problems}" -ne 0 ]; then
     echo "AVISO: ${problems} componente(s) sem resposta; a aba Rede do frontend detalha o estado."
+fi
+if [ "${isolated}" -ne 0 ]; then
+    echo "AVISO: ${isolated} custodiante(s) em modo isolado, sem verificação no livro-razão."
 fi
 echo "Frontend disponível em ${API_URL}"
 echo ""
