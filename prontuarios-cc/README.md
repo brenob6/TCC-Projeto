@@ -56,7 +56,7 @@ custodiada pelo KMS (B-07/B-08).
 | B-02 | `setProfessionalStatus` | escrita | Encerra/restabelece vínculo e habilitação emergencial |
 | B-03 | `registerMedicalRecord` | escrita | Registra o CID (Figura 7); exige consentimento de escrita |
 | B-03 | `requestRecordAccess` | escrita | Decide e audita a leitura (Figuras 8 e 9) |
-| B-03 | `getAccessAuthorization` | consulta | Permite ao KMS validar a autorização antes de decifrar |
+| B-03 | `getAccessAuthorization` | consulta | Permite aos custodiantes confirmar a autorização antes de decifrar (inclui a justificativa do acesso extraordinário) |
 | B-03 | `listPatientRecords` | consulta | Prontuários acessíveis ao profissional |
 | B-03 | `getAccessHistory` | consulta | Histórico de acessos (RF-08) |
 | B-03 | `invalidateMedicalRecord` | escrita | Eliminação lógica assinada pelo paciente |
@@ -108,7 +108,6 @@ mensagem, e `cmd/patient-signer` gera chaves e assinaturas para testes.
 |---|---|
 | `deploy.sh` | Primeira implantação: instala, aprova, inicia o serviço e confirma a definição |
 | `update.sh` | Atualiza o chaincode em uma rede já implantada (ver abaixo) |
-| `test-e2e.sh` | Fluxos das Figuras 7 a 9 na rede real |
 | `lib.sh` | Funções comuns: liga ou retoma as máquinas, repara a rede privada, aguarda o líder Raft, distribui os artefatos e verifica o resultado |
 
 ### Scripts das máquinas (`scripts/fabric/`)
@@ -147,7 +146,6 @@ máquinas, se necessário.
 
 ```sh
 ./scripts/vagrant/deploy.sh
-./scripts/vagrant/test-e2e.sh
 ```
 
 O `deploy.sh` copia os artefatos para `../fabric-network/chaincode/`
@@ -163,7 +161,7 @@ Por fim, confirma a definição no canal a partir de `fabric-node-1`.
 ### Atualização do chaincode
 
 ```sh
-./scripts/vagrant/update.sh            # ou: update.sh --testar
+./scripts/vagrant/update.sh
 ```
 
 No modelo CCaaS, o pacote registrado no canal contém apenas o endereço do
@@ -208,7 +206,7 @@ bash /vagrant/chaincode/cc.sh query readAsset /tmp/a.json
   instituição assina com a identidade da organização, e o chaincode valida o
   vínculo do profissional com essa organização.
 - A integração com IPFS, KMS e API (B-06, B-07 e B-09) não faz parte deste
-  componente. O teste de ponta a ponta simula o CID e o hash.
+  componente.
 - Após retomar as máquinas de um estado salvo do VirtualBox, a rede
   *host-only* pode ficar parcialmente inacessível (Raft sem líder). Os
   scripts de `scripts/vagrant/` detectam a falha e restabelecem a

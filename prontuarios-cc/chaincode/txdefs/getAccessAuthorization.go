@@ -83,6 +83,15 @@ var GetAccessAuthorization = tx.Transaction{
 			res["contentHash"] = (*record)["contentHash"]
 			res["kmsKeyId"] = (*record)["kmsKeyId"]
 			res["emergency"] = operation == datatypes.OpEmergencyRead
+			// A justificativa do acesso extraordinário é devolvida para que os
+			// custodiantes a registrem a partir do livro-razão, e não da API.
+			if emKey := refKey((*logAsset)["emergency"]); emKey != "" {
+				em, err := getAssetByKey(stub, "emergencyAccess", emKey, "acesso extraordinário")
+				if err != nil {
+					return nil, err
+				}
+				res["emergencyReason"] = (*em)["reason"]
+			}
 		}
 		res["valid"] = valid
 

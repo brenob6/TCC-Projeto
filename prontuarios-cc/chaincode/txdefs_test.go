@@ -413,7 +413,7 @@ func TestEmergencyAccess(t *testing.T) {
 	auth := f.mustInvoke("Org2MSP", "getAccessAuthorization", map[string]interface{}{
 		"accessLog": ref(read["accessLog"].(string)),
 	}, nil).object(t)
-	if auth["valid"] != true || auth["emergency"] != true {
+	if auth["valid"] != true || auth["emergency"] != true || auth["emergencyReason"] != request["reason"] {
 		t.Fatalf("autorização emergencial: %v", auth)
 	}
 
