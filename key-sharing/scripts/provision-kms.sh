@@ -22,6 +22,9 @@ install -d -o ${KMS_USER} -g ${KMS_USER} ${WORKDIR}
 cat > /etc/profile.d/kms.sh <<'EOF'
 export CUSTODIANS=192.168.56.21:50051,192.168.56.22:50051,192.168.56.23:50051
 export THRESHOLD=2
+export TLS_CA=/vagrant/build/tls/ca.crt
+export TLS_CERT=/vagrant/build/tls/coordinator.crt
+export TLS_KEY=/vagrant/build/tls/coordinator.key
 EOF
 
 echo ""

@@ -3,22 +3,51 @@ package kms
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
+	"poc-key-sharing/internal/crypto"
 	"poc-key-sharing/internal/custodian"
+	"poc-key-sharing/internal/tlsconf"
 	"poc-key-sharing/pb"
 )
 
-// startCustodians sobe n custodiantes reais em portas locais e devolve seus
-// endereços, além de uma função para consultar a base de cada um.
+// pki é a autoridade certificadora efêmera compartilhada pelos testes.
+var (
+	pkiOnce sync.Once
+	pkiVal  *tlsconf.TestPKI
+	pkiErr  error
+)
+
+func testPKI(t *testing.T) *tlsconf.TestPKI {
+	t.Helper()
+	pkiOnce.Do(func() { pkiVal, pkiErr = tlsconf.NewTestPKI() })
+	if pkiErr != nil {
+		t.Fatalf("gerando certificados de teste: %v", pkiErr)
+	}
+	return pkiVal
+}
+
+// startCustodians sobe n custodiantes reais, no modo isolado, em portas
+// locais com TLS mútuo e devolve seus endereços e bases.
 func startCustodians(t *testing.T, n int) (addrs []string, stores []*custodian.Store) {
 	t.Helper()
+	return startCustodiansWith(t, n, nil)
+}
+
+// startCustodiansWith sobe n custodiantes que confirmam as autorizações com
+// auth (nulo para o modo isolado).
+func startCustodiansWith(t *testing.T, n int, auth custodian.Authorizer) (addrs []string, stores []*custodian.Store) {
+	t.Helper()
+	pki := testPKI(t)
 
 	for i := 0; i < n; i++ {
 		id := fmt.Sprintf("custodian-%d", i+1)
@@ -34,8 +63,8 @@ func startCustodians(t *testing.T, n int) (addrs []string, stores []*custodian.S
 			t.Fatalf("escutando para %s: %v", id, err)
 		}
 
-		server := grpc.NewServer()
-		pb.RegisterCustodianServiceServer(server, custodian.NewServer(id, store))
+		server := grpc.NewServer(grpc.Creds(credentials.NewTLS(pki.Server)))
+		pb.RegisterCustodianServiceServer(server, custodian.NewServer(id, store, auth))
 		go server.Serve(lis)
 		t.Cleanup(server.Stop)
 
@@ -59,6 +88,16 @@ func enderecoSemServidor(t *testing.T) string {
 	return addr
 }
 
+// envelopeOf serializa o envelope como ele é armazenado no IPFS.
+func envelopeOf(t *testing.T, rec *crypto.EncryptedRecord) []byte {
+	t.Helper()
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("serializando envelope: %v", err)
+	}
+	return data
+}
+
 func newTestKMS(t *testing.T, threshold int, addrs []string) *KMS {
 	t.Helper()
 
@@ -66,6 +105,7 @@ func newTestKMS(t *testing.T, threshold int, addrs []string) *KMS {
 		Threshold:  threshold,
 		Custodians: addrs,
 		Timeout:    5 * time.Second,
+		TLS:        testPKI(t).Client,
 	})
 	if err != nil {
 		t.Fatalf("criando KMS: %v", err)
@@ -92,7 +132,7 @@ func TestFluxoCompleto(t *testing.T) {
 		t.Fatalf("cifrando: %v", err)
 	}
 
-	got, err := service.Decrypt(ctx, "paciente-001", rec, AuditInfo{
+	got, err := service.Decrypt(ctx, "paciente-001", envelopeOf(t, rec), AuditInfo{
 		RequesterID:   "medico-001",
 		InstitutionID: "hospital-a",
 	})
@@ -125,7 +165,7 @@ func TestToleraCustodianteIndisponivel(t *testing.T) {
 	// servidor: com k=2, os dois restantes bastam para recuperar o prontuário.
 	comQueda := []string{addrs[0], addrs[1], enderecoSemServidor(t)}
 	parcial := newTestKMS(t, 2, comQueda)
-	got, err := parcial.Decrypt(ctx, "paciente-002", rec, AuditInfo{
+	got, err := parcial.Decrypt(ctx, "paciente-002", envelopeOf(t, rec), AuditInfo{
 		RequesterID:   "medico-002",
 		InstitutionID: "hospital-b",
 	})
@@ -158,7 +198,7 @@ func TestLimiarNaoAtingido(t *testing.T) {
 	// parcial o limiar k=2 não é alcançado.
 	indisponiveis := []string{addrs[0], enderecoSemServidor(t), enderecoSemServidor(t)}
 	insuficiente := newTestKMS(t, 2, indisponiveis)
-	if _, err := insuficiente.Decrypt(ctx, "paciente-003", rec, AuditInfo{
+	if _, err := insuficiente.Decrypt(ctx, "paciente-003", envelopeOf(t, rec), AuditInfo{
 		RequesterID:   "medico-003",
 		InstitutionID: "hospital-c",
 	}); err == nil {
@@ -185,7 +225,7 @@ func TestRecuperacaoExtraordinariaRegistraAuditoria(t *testing.T) {
 	}
 
 	const motivo = "paciente inconsciente em atendimento de urgência"
-	got, err := service.Decrypt(ctx, "paciente-004", rec, AuditInfo{
+	got, err := service.Decrypt(ctx, "paciente-004", envelopeOf(t, rec), AuditInfo{
 		RequesterID:   "medico-plantao",
 		InstitutionID: "hospital-emergencia",
 		Emergency:     true,
@@ -238,7 +278,7 @@ func TestEmergenciaSemJustificativaFalha(t *testing.T) {
 		t.Fatalf("cifrando: %v", err)
 	}
 
-	if _, err := service.Decrypt(ctx, "paciente-005", rec, AuditInfo{
+	if _, err := service.Decrypt(ctx, "paciente-005", envelopeOf(t, rec), AuditInfo{
 		RequesterID:   "medico-005",
 		InstitutionID: "hospital-e",
 		Emergency:     true,
@@ -262,7 +302,7 @@ func TestChaveInexistenteFalha(t *testing.T) {
 		t.Fatalf("cifrando: %v", err)
 	}
 
-	if _, err := service.Decrypt(ctx, "paciente-inexistente", rec, AuditInfo{
+	if _, err := service.Decrypt(ctx, "paciente-inexistente", envelopeOf(t, rec), AuditInfo{
 		RequesterID:   "medico-006",
 		InstitutionID: "hospital-f",
 	}); err == nil {
@@ -275,8 +315,9 @@ func TestNewRejeitaConfiguracaoInvalida(t *testing.T) {
 		nome string
 		cfg  Config
 	}{
-		{"limiar menor que dois", Config{Threshold: 1, Custodians: []string{"a:1", "b:2"}}},
-		{"custodiantes insuficientes", Config{Threshold: 3, Custodians: []string{"a:1", "b:2"}}},
+		{"limiar menor que dois", Config{Threshold: 1, Custodians: []string{"a:1", "b:2"}, TLS: testPKI(t).Client}},
+		{"custodiantes insuficientes", Config{Threshold: 3, Custodians: []string{"a:1", "b:2"}, TLS: testPKI(t).Client}},
+		{"sem TLS", Config{Threshold: 2, Custodians: []string{"a:1", "b:2"}}},
 	}
 
 	for _, c := range casos {

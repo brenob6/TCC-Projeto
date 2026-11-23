@@ -8,14 +8,15 @@ option go_package = "poc-key-sharing/pb;pb";
 //
 // Cada custodiante armazena apenas um compartilhamento (share) da chave
 // criptográfica do paciente, gerado pelo esquema Shamir Secret Sharing.
-// O KMS é o único cliente deste serviço.
+// O KMS é o único cliente deste serviço, autenticado por TLS mútuo.
 service CustodianService {
   // StoreShare persiste um compartilhamento sob custódia do custodiante.
   rpc StoreShare(StoreShareRequest) returns (StoreShareResponse);
 
   // PartialDecrypt executa a decifração parcial D_i = C1^{x_i} usando o
   // share local. O share jamais é transmitido pela rede, garantindo que a
-  // chave privada não seja reconstituída em nenhuma entidade.
+  // chave privada não seja reconstituída em nenhuma entidade. Antes do
+  // cálculo, o custodiante confirma a autorização no livro-razão.
   rpc PartialDecrypt(PartialDecryptRequest) returns (PartialDecryptResponse);
 
   // Health informa o estado do custodiante e quantos shares ele mantém.
@@ -37,11 +38,23 @@ message StoreShareResponse {
 }
 
 message PartialDecryptRequest {
+  // O campo 2 transportava apenas o ponto C1. O custodiante passou a extraí-lo
+  // do envelope, cujo resumo é conferido com o registrado no livro-razão.
+  reserved 2;
+  reserved "c1";
+
   string key_id = 1;
-  // Ponto efêmero C1 = g^r do cabeçalho do prontuário cifrado.
-  bytes c1 = 2;
-  // Registro de auditoria: identifica quem autorizou a operação.
+  // Dados de auditoria informados pelo coordenador. Com a verificação no
+  // livro-razão habilitada, o custodiante registra os dados obtidos no
+  // livro-razão e utiliza estes apenas no modo isolado.
   AuditContext audit = 3;
+  // Chave do registro de auditoria (accessLog) gravado pela transação de
+  // leitura. O custodiante confirma no livro-razão que ele corresponde a uma
+  // leitura autorizada, recente e da chave solicitada, e o aceita uma única vez.
+  string access_log = 4;
+  // Envelope cifrado, exatamente como armazenado no IPFS. O custodiante confere
+  // seu SHA-256 com o resumo registrado no livro-razão e dele extrai C1 = g^r.
+  bytes envelope = 5;
 }
 
 message PartialDecryptResponse {
@@ -70,4 +83,7 @@ message HealthRequest {}
 message HealthResponse {
   string custodian_id = 1;
   int32 share_count = 2;
+  // Indica se o custodiante confirma cada autorização no livro-razão. É falso
+  // apenas no modo isolado, usado nos testes do módulo sem a rede blockchain.
+  bool ledger_verification = 3;
 }

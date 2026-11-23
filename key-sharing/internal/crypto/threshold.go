@@ -13,6 +13,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 
 	"go.dedis.ch/kyber/v3/share"
@@ -37,6 +38,19 @@ type EncryptedRecord struct {
 	WrappedKey []byte `json:"wrapped_key"` // K XOR SHA256(Y^r)
 	Nonce      []byte `json:"nonce"`       // nonce AES-GCM
 	Ciphertext []byte `json:"ciphertext"`  // prontuário cifrado com AES-256-GCM
+}
+
+// ParseEnvelope decodifica o envelope serializado em JSON, formato em que ele
+// é armazenado na rede IPFS.
+func ParseEnvelope(data []byte) (*EncryptedRecord, error) {
+	var rec EncryptedRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return nil, fmt.Errorf("envelope inválido: %w", err)
+	}
+	if len(rec.C1) == 0 {
+		return nil, fmt.Errorf("envelope inválido: C1 ausente")
+	}
+	return &rec, nil
 }
 
 // GenerateKey cria uma chave de limiar (k,n): retorna a chave pública e os n

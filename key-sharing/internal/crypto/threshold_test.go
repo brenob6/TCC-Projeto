@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 )
 
@@ -159,5 +160,35 @@ func TestCiphertextAdulteradoFalha(t *testing.T) {
 	partials := partialsFor(t, shares, rec.C1, 0, 1)
 	if _, err := CombineAndDecrypt(rec, partials, testThreshold, testTotal); err == nil {
 		t.Error("decifração de prontuário adulterado deveria falhar")
+	}
+}
+
+// O envelope serializado em JSON, como armazenado no IPFS, é decodificado sem
+// perda, e envelopes malformados ou sem C1 são recusados.
+func TestParseEnvelope(t *testing.T) {
+	pubKey, _, err := GenerateKey(2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := Encrypt(pubKey, []byte("prontuário"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseEnvelope(data)
+	if err != nil {
+		t.Fatalf("decodificando envelope: %v", err)
+	}
+	if !bytes.Equal(got.C1, rec.C1) || !bytes.Equal(got.Ciphertext, rec.Ciphertext) {
+		t.Fatal("envelope decodificado difere do original")
+	}
+
+	for _, invalido := range []string{`não é JSON`, `{"ciphertext": "AA=="}`} {
+		if _, err := ParseEnvelope([]byte(invalido)); err == nil {
+			t.Errorf("envelope %q deveria ser recusado", invalido)
+		}
 	}
 }

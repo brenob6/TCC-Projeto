@@ -3,7 +3,8 @@
 //
 // Uso:
 //
-//	kms -custodians host1:50051,host2:50051,host3:50051 -k 2 <comando> [args]
+//	kms -custodians host1:50051,host2:50051,host3:50051 -k 2 \
+//	    -tls-ca ca.crt -tls-cert coordinator.crt -tls-key coordinator.key <comando> [args]
 //
 // Comandos:
 //
@@ -25,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"poc-key-sharing/internal/crypto"
 	"poc-key-sharing/internal/kms"
+	"poc-key-sharing/internal/tlsconf"
 )
 
 // keyDir guarda as chaves públicas dos pacientes. Somente material público é
@@ -40,6 +41,10 @@ func main() {
 	requester := flag.String("requester", "medico-001", "identificador do solicitante")
 	institution := flag.String("institution", "hospital-a", "instituição de origem")
 	reason := flag.String("reason", "", "justificativa (obrigatória na recuperação extraordinária)")
+	accessLog := flag.String("access-log", "", "registro de auditoria do livro-razão que autoriza a decifração")
+	tlsCA := flag.String("tls-ca", os.Getenv("TLS_CA"), "CA que emitiu os certificados dos custodiantes (env TLS_CA)")
+	tlsCert := flag.String("tls-cert", os.Getenv("TLS_CERT"), "certificado TLS do coordenador (env TLS_CERT)")
+	tlsKey := flag.String("tls-key", os.Getenv("TLS_KEY"), "chave privada TLS do coordenador (env TLS_KEY)")
 	flag.Parse()
 
 	args := flag.Args()
@@ -48,11 +53,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	tlsCfg, err := tlsconf.Client(tlsconf.Files{CACert: *tlsCA, Cert: *tlsCert, Key: *tlsKey})
+	if err != nil {
+		fatal(err)
+	}
+
 	addrs := splitAddrs(*custodians)
 	service, err := kms.New(kms.Config{
 		Threshold:  *threshold,
 		Custodians: addrs,
 		Timeout:    10 * time.Second,
+		TLS:        tlsCfg,
 	})
 	if err != nil {
 		fatal(err)
@@ -74,6 +85,7 @@ func main() {
 	case "decrypt":
 		err = withArgs(args, 3, "decrypt <key-id> <arquivo.enc>", func() error {
 			return decrypt(ctx, service, args[1], args[2], kms.AuditInfo{
+				AccessLog:     *accessLog,
 				RequesterID:   *requester,
 				InstitutionID: *institution,
 			})
@@ -85,6 +97,7 @@ func main() {
 				justification = "atendimento emergencial: paciente inconsciente"
 			}
 			return decrypt(ctx, service, args[1], args[2], kms.AuditInfo{
+				AccessLog:     *accessLog,
 				RequesterID:   *requester,
 				InstitutionID: *institution,
 				Emergency:     true,
@@ -166,8 +179,8 @@ func encrypt(service *kms.KMS, keyID, inputPath string) error {
 }
 
 func decrypt(ctx context.Context, service *kms.KMS, keyID, inputPath string, audit kms.AuditInfo) error {
-	var rec crypto.EncryptedRecord
-	if err := readJSON(inputPath, &rec); err != nil {
+	envelope, err := os.ReadFile(inputPath)
+	if err != nil {
 		return fmt.Errorf("carregando prontuário cifrado: %w", err)
 	}
 
@@ -175,7 +188,7 @@ func decrypt(ctx context.Context, service *kms.KMS, keyID, inputPath string, aud
 		fmt.Printf("Recuperação extraordinária — justificativa: %s\n", audit.Reason)
 	}
 
-	plaintext, err := service.Decrypt(ctx, keyID, &rec, audit)
+	plaintext, err := service.Decrypt(ctx, keyID, envelope, audit)
 	if err != nil {
 		return err
 	}
@@ -274,6 +287,10 @@ Flags:
   -requester   identificador do solicitante
   -institution instituição de origem
   -reason      justificativa da recuperação extraordinária
+  -access-log  registro de auditoria do livro-razão (custodiantes com -ledger)
+  -tls-ca      CA dos certificados TLS (env TLS_CA)
+  -tls-cert    certificado TLS do coordenador (env TLS_CERT)
+  -tls-key     chave privada TLS do coordenador (env TLS_KEY)
 
 Exemplo:
   kms -custodians 192.168.56.21:50051,192.168.56.22:50051,192.168.56.23:50051 -k 2 \

@@ -24,13 +24,53 @@ Consequências:
 - São necessários pelo menos `k` custodiantes para qualquer recuperação.
 - Com `n > k`, a indisponibilidade de custodiantes não interrompe o atendimento.
 
+## Autorização confirmada no livro-razão
+
+No ambiente integrado, cada custodiante só calcula a decifração parcial depois
+de confirmar, por conta própria, que ela foi autorizada. O coordenador (a API
+Gateway) informa a chave do registro de auditoria (`accessLog`) gravado pela
+transação de leitura e envia o envelope exatamente como armazenado no IPFS. O
+custodiante, então:
+
+1. executa a transação somente leitura `getAccessAuthorization` no peer de uma
+   organização, com uma identidade cliente própria (`User2@orgN`);
+2. exige que o registro corresponda a uma leitura autorizada, regular ou
+   extraordinária, ocorrida há no máximo cinco minutos;
+3. exige que a chave do paciente registrada seja a solicitada e que o SHA-256
+   do envelope recebido seja o registrado no livro-razão; o ponto `C1` é
+   extraído desse envelope;
+4. grava a operação na auditoria local com os dados do livro-razão
+   (profissional, instituição, caráter emergencial e justificativa), e não com
+   os informados pelo coordenador. O índice único sobre o `accessLog` faz com
+   que cada registro autorize uma única decifração por custodiante.
+
+Se o livro-razão não puder ser consultado, a operação é recusada. Assim, quem
+controla o coordenador, inclusive uma API comprometida, não decifra prontuário
+algum sem que a leitura tenha sido registrada no livro-razão, e um registro só
+serve para o prontuário a que se refere.
+
+Cada custodiante `N` consulta o peer da organização `OrgN`, de modo que forjar
+autorizações exigiria comprometer ao menos `k` peers distintos.
+
+O canal entre o coordenador e os custodiantes usa TLS 1.3 com autenticação
+mútua: os custodiantes só aceitam o certificado do coordenador emitido pela CA
+do ambiente (`scripts/gen-tls.sh`), e o coordenador verifica o endereço de
+cada custodiante no certificado dele.
+
+O **modo isolado** (`custodian -isolado`) dispensa a consulta ao livro-razão e
+registra os dados informados pelo coordenador. Ele existe apenas para os
+testes deste módulo, que não dispõem da rede Fabric, e é indicado pelo
+`Health` de cada custodiante.
+
 ## Componentes
 
 | Caminho | Papel |
 | --- | --- |
 | `proto/custodian.proto` | Contrato gRPC do custodiante |
 | `internal/crypto` | Esquema de limiar (Shamir + ElGamal + AES-256-GCM) |
-| `internal/custodian` | Serviço gRPC e persistência SQLite |
+| `internal/custodian` | Serviço gRPC, verificação da autorização e persistência SQLite |
+| `internal/ledger` | Consulta de `getAccessAuthorization` pelo Fabric Gateway |
+| `internal/tlsconf` | Configuração do TLS mútuo entre coordenador e custodiantes |
 | `internal/kms` | Cliente que coordena os custodiantes |
 | `cmd/custodian` | Binário do Custodiante de Chaves |
 | `cmd/kms` | Interface de linha de comando do KMS |
@@ -48,12 +88,13 @@ recebe os binários compilados (ignorado pelo Git).
 | RPC | Função |
 | --- | --- |
 | `StoreShare` | Recebe e persiste o compartilhamento de uma chave |
-| `PartialDecrypt` | Calcula `D_i = C1^{x_i}` e registra a operação na auditoria |
-| `Health` | Informa a disponibilidade do custodiante |
+| `PartialDecrypt` | Confirma a autorização no livro-razão, registra a operação na auditoria e calcula `D_i = C1^{x_i}` |
+| `Health` | Informa a disponibilidade do custodiante e se ele confirma as autorizações no livro-razão |
 
 Cada custodiante mantém uma base SQLite com duas tabelas: `shares`
 (compartilhamento por `key_id`) e `access_log` (solicitante, instituição,
-caráter emergencial, justificativa e momento da operação).
+caráter emergencial, justificativa, registro de auditoria do livro-razão e
+momento da operação).
 
 ### Cifração de um prontuário
 
@@ -81,10 +122,12 @@ na arquitetura final, na rede IPFS. A chave simétrica `K` não é persistida.
 
 | Script | Onde executa | Função |
 | --- | --- | --- |
-| `scripts/start.sh` | Host | Compila, sobe as máquinas e executa os fluxos de operação |
+| `scripts/start.sh` | Host | Compila, gera os certificados, sobe as máquinas no modo isolado e executa os fluxos de operação |
 | `scripts/build.sh` | Host | Compila `custodian` e `kms` estáticos para `linux/amd64` em `build/` |
-| `scripts/provision.sh` | VM custodiante | Instala o binário, o `sqlite3` e o serviço systemd `custodian` (porta 50051, base em `/var/lib/custodian/shares.db`) |
-| `scripts/provision-kms.sh` | VM `kms` | Instala o binário e define `CUSTODIANS` e `THRESHOLD` em `/etc/profile.d/kms.sh` |
+| `scripts/gen-tls.sh` | Host | Gera em `build/tls/` a CA e os certificados do TLS mútuo (custodiantes e coordenador) e descarta a chave da CA |
+| `scripts/ledger-config.sh` | Host | Gera em `build/ledger/custodian-N/` a conexão de cada custodiante com o peer de `OrgN`, a partir de `fabric-network/organizations` |
+| `scripts/provision.sh` | VM custodiante | Instala o binário, o material TLS e a conexão com o livro-razão em `/etc/custodian`, o `sqlite3` e o serviço systemd `custodian` (porta 50051, base em `/var/lib/custodian/shares.db`); o modo vem de `CUSTODIAN_MODE` (`livro-razao`, padrão, ou `isolado`) |
+| `scripts/provision-kms.sh` | VM `kms` | Instala o binário e define `CUSTODIANS`, `THRESHOLD` e o material TLS em `/etc/profile.d/kms.sh` |
 | `scripts/test.sh` | VM `kms` | Fluxos de ponta a ponta: `health`, `keygen`, `encrypt`, recuperação autorizada, recuperação extraordinária |
 | `scripts/test-tolerancia.sh` | Host | Para e reinicia custodiantes para validar o limiar e exibe a auditoria de cada nó |
 
@@ -118,13 +161,18 @@ máquinas pela pasta compartilhada, dispensando a instalação do Go nas VMs.
 ```
 
 O script compila os binários, sobe as máquinas e executa os fluxos de operação.
-Equivale a:
+Como este ambiente não inclui a rede Fabric, os custodiantes são provisionados
+no modo isolado. Equivale a:
 
 ```sh
 ./scripts/build.sh
-vagrant up
+./scripts/gen-tls.sh
+CUSTODIAN_MODE=isolado vagrant up --provision
 vagrant provision kms --provision-with=test
 ```
+
+O `./start.sh` da raiz do projeto reprovisiona os custodiantes no modo
+`livro-razao`, após gerar a conexão de cada um com o peer.
 
 Para validar a tolerância a falhas e inspecionar a auditoria — o script usa o
 comando `vagrant` para parar e reiniciar custodiantes, portanto roda no host:
@@ -137,7 +185,7 @@ comando `vagrant` para parar e reiniciar custodiantes, portanto roda no host:
 
 Os passos abaixo reproduzem, um a um, os fluxos de `scripts/test.sh` e permitem
 observar o estado de cada máquina. Pressupõem o ambiente já criado com
-`./scripts/build.sh` e `vagrant up`. Os comandos indicados como **host** rodam
+`./scripts/start.sh` (custodiantes no modo isolado). Os comandos indicados como **host** rodam
 no diretório do projeto; os indicados como **kms** rodam dentro da máquina
 `kms`.
 
@@ -280,6 +328,8 @@ verificação.
 | `-requester` | `medico-001` | Identificador do solicitante, registrado na auditoria |
 | `-institution` | `hospital-a` | Instituição de origem |
 | `-reason` | vazio | Justificativa da recuperação extraordinária |
+| `-access-log` | vazio | Registro de auditoria do livro-razão que autoriza a decifração (custodiantes no modo `livro-razao`) |
+| `-tls-ca`, `-tls-cert`, `-tls-key` | `$TLS_CA`, `$TLS_CERT`, `$TLS_KEY` | CA e certificado do coordenador para o TLS mútuo |
 
 | Comando | Efeito |
 | --- | --- |
@@ -289,14 +339,18 @@ verificação.
 | `decrypt <key-id> <arquivo.enc>` | Recupera o prontuário em `decifrado_<arquivo>` |
 | `emergency <key-id> <arquivo.enc>` | Recuperação extraordinária; sem `-reason`, a CLI aplica uma justificativa padrão |
 
-`custodian -id <nome> -listen <endereço> -db <caminho>` inicia um custodiante
-(padrões: nome da máquina, `0.0.0.0:50051` e `shares.db`).
+`custodian -id <nome> -listen <endereço> -db <caminho> -tls-ca <ca> -tls-cert
+<crt> -tls-key <key> (-ledger <ledger.json> | -isolado)` inicia um custodiante
+(padrões: nome da máquina, `0.0.0.0:50051` e `shares.db`). O material TLS e
+uma das opções `-ledger` ou `-isolado` são obrigatórios.
 
 ### Auditoria
 
 Cada custodiante registra localmente toda decifração parcial que executa,
-identificando solicitante, instituição, caráter emergencial e justificativa. O
-acesso é negado caso o registro de auditoria falhe.
+identificando solicitante, instituição, caráter emergencial, justificativa e,
+no modo `livro-razao`, o registro de auditoria do livro-razão que a
+autorizou. Nesse modo, os dados vêm do livro-razão. O acesso é negado caso o
+registro local falhe ou caso o registro do livro-razão já tenha sido usado.
 
 ```sh
 vagrant ssh custodian-1 -c \
@@ -311,29 +365,48 @@ go test ./...
 go test -race ./...
 ```
 
-Os testes de `internal/kms` sobem custodiantes gRPC reais em portas locais e
-cobrem: fluxo completo, recuperação com um custodiante indisponível, recusa
-abaixo do limiar, registro de auditoria da recuperação extraordinária, acesso
-emergencial sem justificativa e chave inexistente. Os de `internal/crypto`
-cobrem o esquema de limiar, incluindo a recusa de compartilhamentos de outra
-chave e a detecção de prontuários adulterados.
+Os testes de `internal/kms` sobem custodiantes gRPC reais em portas locais,
+com TLS mútuo e certificados efêmeros, e cobrem: fluxo completo, recuperação
+com um custodiante indisponível, recusa abaixo do limiar, registro de auditoria
+da recuperação extraordinária, acesso emergencial sem justificativa e chave
+inexistente. Com um livro-razão simulado, cobrem ainda a recusa sem registro de
+auditoria, com registro inválido, com registro de outra chave, com o envelope
+de outro prontuário, com registro já utilizado e com o livro-razão
+indisponível, o registro na auditoria local dos dados do livro-razão e a
+recusa de clientes sem TLS ou com certificado de outra CA. Os de
+`internal/crypto` cobrem o esquema de limiar, incluindo a recusa de
+compartilhamentos de outra chave e a detecção de prontuários adulterados; os
+de `internal/custodian`, a migração da base e o uso único das autorizações;
+os de `internal/ledger`, a leitura da configuração e a interpretação das
+respostas do chaincode.
 
 ## Escopo
 
-Esta prova de conceito cobre o gerenciamento de chaves. Não integra a rede
-Hyperledger Fabric (B-01 a B-05) nem o armazenamento IPFS (B-06): a validação
-das permissões na *blockchain* e a persistência dos envelopes na rede
-distribuída ocorrem fora deste componente.
+Este módulo cobre o gerenciamento de chaves. A avaliação das permissões é
+feita pelo chaincode (`../prontuarios-cc`), e a persistência dos envelopes,
+pela rede IPFS (`../ipfs-private`); os custodiantes apenas confirmam, no
+livro-razão, o resultado registrado por essa avaliação.
 
-O canal gRPC opera sem TLS e sem autenticação mútua, o que simplifica a execução
-dos testes. Em produção, a comunicação entre KMS e custodiantes exige mTLS, e a
-autorização de cada decifração parcial deve ser vinculada à permissão registrada
-na *blockchain*.
+Limitações conhecidas:
+
+- O chaincode restringe as consultas às organizações do consórcio; por isso,
+  cada custodiante usa uma identidade cliente emitida pela CA de uma
+  organização. Em produção, os custodiantes teriam um MSP próprio.
+- As identidades das instituições (`User1@orgN`) ficam com a API Gateway, que
+  pode solicitar leituras e acessos extraordinários em nome dos profissionais.
+  Os custodiantes impedem decifrações sem registro no livro-razão, mas não
+  impedem que uma API comprometida crie registros legítimos; nesse caso, o
+  abuso fica registrado de forma imutável. Impedi-lo exigiria a assinatura do
+  profissional na solicitação de acesso.
+- Nas máquinas Vagrant, a pasta do módulo é compartilhada com todas as
+  máquinas, inclusive `build/tls` e `build/ledger`; cada custodiante copia
+  apenas o próprio material para `/etc/custodian`.
 
 ## Requisitos atendidos
 
 - **RF-05** — apenas quem reúne `k` decifrações parciais acessa o prontuário;
-  a chave privada não existe de forma integral em nenhuma entidade.
+  a chave privada não existe de forma integral em nenhuma entidade, e cada
+  decifração parcial exige uma leitura autorizada e registrada no livro-razão.
 - **RF-06** — a recuperação extraordinária exige justificativa e fica
   registrada em todos os custodiantes que participaram da operação.
 - **RF-03 / RF-08** — cada custodiante mantém histórico com solicitante,

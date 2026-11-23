@@ -25,9 +25,11 @@ Vagrant.configure("2") do |config|
 
       machine.vm.network "private_network", ip: node[:ip]
 
+      # CUSTODIAN_MODE=isolado dispensa a verificação no livro-razão e é
+      # usado apenas nos testes do módulo (scripts/start.sh).
       machine.vm.provision "shell",
         path: "scripts/provision.sh",
-        args: [node[:name]]
+        args: [node[:name], ENV.fetch("CUSTODIAN_MODE", "livro-razao")]
     end
   end
 

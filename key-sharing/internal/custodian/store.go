@@ -5,6 +5,7 @@ package custodian
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	_ "modernc.org/sqlite" // driver SQLite sem dependência de CGO
@@ -37,6 +38,16 @@ CREATE TABLE IF NOT EXISTS access_log (
 );
 `
 
+// accessLogIndex: a coluna ledger_access_log guarda a chave do registro de auditoria do livro-razão que
+// autorizou a operação. O índice único impede que a mesma autorização seja
+// usada duas vezes no mesmo custodiante. A coluna é acrescentada por
+// migração, para preservar as bases criadas antes da verificação no
+// livro-razão.
+const accessLogIndex = `
+CREATE UNIQUE INDEX IF NOT EXISTS access_log_ledger
+    ON access_log (ledger_access_log) WHERE ledger_access_log IS NOT NULL;
+`
+
 // OpenStore abre (ou cria) a base local do custodiante.
 func OpenStore(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
@@ -51,7 +62,31 @@ func OpenStore(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("criando esquema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+// migrate acrescenta a coluna ledger_access_log às bases antigas.
+func migrate(db *sql.DB) error {
+	var n int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('access_log') WHERE name = 'ledger_access_log'`,
+	).Scan(&n)
+	if err != nil {
+		return fmt.Errorf("inspecionando o esquema: %w", err)
+	}
+	if n == 0 {
+		if _, err := db.Exec(`ALTER TABLE access_log ADD COLUMN ledger_access_log TEXT`); err != nil {
+			return fmt.Errorf("migrando o esquema: %w", err)
+		}
+	}
+	if _, err := db.Exec(accessLogIndex); err != nil {
+		return fmt.Errorf("criando o índice de autorizações: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -95,15 +130,32 @@ func (s *Store) CountShares() (int, error) {
 	return n, nil
 }
 
-// LogAccess registra localmente uma operação de decifração parcial.
-func (s *Store) LogAccess(keyID, requesterID, institutionID string, emergency bool, reason string) error {
-	_, err := s.db.Exec(
-		`INSERT INTO access_log (key_id, requester_id, institution_id, emergency, reason)
-		 VALUES (?, ?, ?, ?, ?)`,
-		keyID, requesterID, institutionID, emergency, reason,
+// ErrAuthorizationUsed indica que o registro de auditoria do livro-razão já
+// autorizou uma decifração parcial neste custodiante.
+var ErrAuthorizationUsed = errors.New("autorização já utilizada")
+
+// LogAccess registra localmente uma operação de decifração parcial. Quando a
+// entrada traz a chave do registro do livro-razão, o registro também consome
+// a autorização: uma segunda operação com a mesma chave devolve
+// ErrAuthorizationUsed e não é gravada.
+func (s *Store) LogAccess(e AccessEntry) error {
+	var ledgerLog any
+	if e.AccessLog != "" {
+		ledgerLog = e.AccessLog
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO access_log (key_id, requester_id, institution_id, emergency, reason, ledger_access_log)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (ledger_access_log) WHERE ledger_access_log IS NOT NULL DO NOTHING`,
+		e.KeyID, e.RequesterID, e.InstitutionID, e.Emergency, e.Reason, ledgerLog,
 	)
 	if err != nil {
-		return fmt.Errorf("registrando acesso a %s: %w", keyID, err)
+		return fmt.Errorf("registrando acesso a %s: %w", e.KeyID, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("registrando acesso a %s: %w", e.KeyID, err)
+	} else if n == 0 {
+		return ErrAuthorizationUsed
 	}
 	return nil
 }
@@ -115,13 +167,14 @@ type AccessEntry struct {
 	InstitutionID string
 	Emergency     bool
 	Reason        string
+	AccessLog     string // chave do registro de auditoria no livro-razão
 	OccurredAt    string
 }
 
 // AccessLog devolve o histórico de acessos em ordem cronológica.
 func (s *Store) AccessLog() ([]AccessEntry, error) {
 	rows, err := s.db.Query(
-		`SELECT key_id, requester_id, institution_id, emergency, reason, occurred_at
+		`SELECT key_id, requester_id, institution_id, emergency, reason, ledger_access_log, occurred_at
 		 FROM access_log ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("consultando auditoria: %w", err)
@@ -131,12 +184,13 @@ func (s *Store) AccessLog() ([]AccessEntry, error) {
 	var entries []AccessEntry
 	for rows.Next() {
 		var e AccessEntry
-		var reason sql.NullString
+		var reason, ledgerLog sql.NullString
 		if err := rows.Scan(&e.KeyID, &e.RequesterID, &e.InstitutionID,
-			&e.Emergency, &reason, &e.OccurredAt); err != nil {
+			&e.Emergency, &reason, &ledgerLog, &e.OccurredAt); err != nil {
 			return nil, fmt.Errorf("lendo auditoria: %w", err)
 		}
 		e.Reason = reason.String
+		e.AccessLog = ledgerLog.String
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
