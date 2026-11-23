@@ -152,7 +152,8 @@ func (s *Server) registerInstitution(w http.ResponseWriter, r *http.Request) {
 		}
 	case asFabric(err, &fe) && fe.Status == http.StatusConflict:
 		// A organização já possui instituição no ledger (por exemplo, criada
-		// pelo test-e2e.sh): sincroniza o diretório se o CNES corresponder.
+		// diretamente pelo CLI do Fabric): sincroniza o diretório se o CNES
+		// corresponder.
 		out, rerr := s.ledger.Evaluate(org.Name, "readAsset",
 			map[string]any{"key": map[string]any{"@assetType": "institution", "id": req.ID}}, nil)
 		if rerr != nil || json.Unmarshal(out, &asset) != nil || asset["mspId"] != org.MSPID {

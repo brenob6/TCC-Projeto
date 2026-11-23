@@ -3,7 +3,6 @@
 # Atualiza o chaincode em uma rede em que ele já foi implantado (deploy.sh).
 #
 #   update.sh            recompila, distribui e reinicia o chaincode
-#   update.sh --testar   idem, e executa test-e2e.sh ao final
 #
 # No modelo CCaaS o pacote registrado no canal contém apenas o endereço do
 # serviço, não o código. Assim, uma mudança de código não exige nova
@@ -21,11 +20,9 @@ set -e
 
 source "$(dirname "$0")/lib.sh"
 
-RUN_TESTS=0
 case "$1" in
     "") ;;
-    --testar) RUN_TESTS=1 ;;
-    *) echo "uso: $0 [--testar]" >&2; exit 2 ;;
+    *) echo "uso: $0" >&2; exit 2 ;;
 esac
 
 echo "== Testes unitários =="
@@ -55,8 +52,3 @@ on_all_parallel "bash /vagrant/chaincode/service.sh activate"
 echo ""
 echo "== Verificação =="
 verify
-
-if [ ${RUN_TESTS} -eq 1 ]; then
-    echo ""
-    "$(dirname "$0")/test-e2e.sh"
-fi

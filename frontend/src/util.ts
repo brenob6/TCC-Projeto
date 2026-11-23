@@ -38,7 +38,7 @@ export interface InstitutionForm {
   cnpj: string
 }
 
-// Instituições sugeridas para cada organização (mesmos dados do test-e2e.sh).
+// Instituições sugeridas para cada organização.
 export const SUGGESTED_INSTITUTIONS: Record<string, InstitutionForm> = {
   Org1: { id: '2345678', name: 'Hospital A', cnpj: '11222333000181' },
   Org2: { id: '3456789', name: 'Hospital B', cnpj: '45997418000153' },
