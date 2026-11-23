@@ -34,7 +34,7 @@ export default function Network({ api }: ViewProps) {
         <div className="layers">
           <div><Badge tone="blue">Blockchain</Badge><p>Cadastros, consentimentos assinados pelo paciente e trilha de auditoria. Nenhum dado pessoal ou clínico.</p></div>
           <div><Badge tone="amber">IPFS</Badge><p>Envelopes cifrados dos prontuários, endereçados pelo CID registrado no ledger.</p></div>
-          <div><Badge tone="green">KMS</Badge><p>Chave de cada paciente dividida por Shamir entre custodiantes; a chave privada nunca é reconstituída.</p></div>
+          <div><Badge tone="green">KMS</Badge><p>Chave de cada paciente dividida por Shamir entre custodiantes; a chave privada nunca é reconstituída. Cada custodiante confirma a autorização no livro-razão antes de decifrar.</p></div>
         </div>
       </Card>
 
