@@ -81,9 +81,12 @@ func (s *fakeStorage) Unpin(_ context.Context, cid string) error {
 
 func (s *fakeStorage) ID(context.Context) (string, error) { return "peer", nil }
 
-// fakeKMS não cifra de fato; registra a auditoria recebida na decifração.
+// fakeKMS não cifra de fato; registra a auditoria e o envelope recebidos na
+// decifração. Com deny preenchido, simula a recusa dos custodiantes.
 type fakeKMS struct {
-	decrypts []kmsclient.AuditInfo
+	decrypts  []kmsclient.AuditInfo
+	envelopes [][]byte
+	deny      error
 }
 
 func (k *fakeKMS) GenerateAndDistribute(context.Context, string) ([]byte, error) {
@@ -94,8 +97,16 @@ func (k *fakeKMS) Encrypt(_, plaintext []byte) (*kmsclient.EncryptedRecord, erro
 	return &kmsclient.EncryptedRecord{C1: []byte("c1"), Ciphertext: plaintext}, nil
 }
 
-func (k *fakeKMS) Decrypt(_ context.Context, _ string, rec *kmsclient.EncryptedRecord, audit kmsclient.AuditInfo) ([]byte, error) {
+func (k *fakeKMS) Decrypt(_ context.Context, _ string, envelope []byte, audit kmsclient.AuditInfo) ([]byte, error) {
 	k.decrypts = append(k.decrypts, audit)
+	k.envelopes = append(k.envelopes, envelope)
+	if k.deny != nil {
+		return nil, k.deny
+	}
+	var rec kmsclient.EncryptedRecord
+	if err := json.Unmarshal(envelope, &rec); err != nil {
+		return nil, err
+	}
 	return rec.Ciphertext, nil
 }
 
@@ -210,6 +221,28 @@ func TestAddAndReadRecord(t *testing.T) {
 	}
 	if len(e.kms.decrypts) != 1 || e.kms.decrypts[0].InstitutionID != "2345678" {
 		t.Fatalf("auditoria enviada ao KMS: %+v", e.kms.decrypts)
+	}
+	// Os custodiantes recebem o registro de auditoria e o envelope exatamente
+	// como armazenado no IPFS, para conferi-los no livro-razão.
+	if e.kms.decrypts[0].AccessLog != "accessLog:1" {
+		t.Fatalf("registro de auditoria enviado ao KMS: %q", e.kms.decrypts[0].AccessLog)
+	}
+	if !bytes.Equal(e.kms.envelopes[0], e.storage.files[cid]) {
+		t.Fatal("o envelope enviado ao KMS difere do armazenado no IPFS")
+	}
+}
+
+// A recusa dos custodiantes chega ao cliente como 403, sem o documento.
+func TestCustodianRefusalIsForbidden(t *testing.T) {
+	e := newEnv(t)
+	e.withRecordFlow(true, true)
+	_, body := addRecord(t, e)
+	cid := body["cid"].(string)
+	e.kms.deny = fmt.Errorf("%w: o registro de auditoria já autorizou uma decifração neste custodiante", kmsclient.ErrDenied)
+
+	code, body := e.do(t, http.MethodPost, "/api/records/"+cid+"/access", map[string]any{"professional": "professional:1"})
+	if code != http.StatusForbidden || body["document"] != nil {
+		t.Fatalf("status %d, corpo %v", code, body)
 	}
 }
 

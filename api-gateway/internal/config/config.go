@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"poc-key-sharing/kmsclient"
 )
 
 // Org descreve a conexão de uma instituição (organização Fabric) com o seu
@@ -25,14 +27,17 @@ type Org struct {
 
 // Config reúne a configuração da API.
 type Config struct {
-	Listen        string   `json:"listen"`
-	Channel       string   `json:"channel"`
-	Chaincode     string   `json:"chaincode"`
-	Orgs          []Org    `json:"orgs"`
-	Custodians    []string `json:"custodians"`
-	Threshold     int      `json:"threshold"`
-	DirectoryFile string   `json:"directoryFile"`
-	StaticDir     string   `json:"staticDir"`
+	Listen     string   `json:"listen"`
+	Channel    string   `json:"channel"`
+	Chaincode  string   `json:"chaincode"`
+	Orgs       []Org    `json:"orgs"`
+	Custodians []string `json:"custodians"`
+	Threshold  int      `json:"threshold"`
+	// CustodianTLS é o material do TLS mútuo com os custodiantes, gerado por
+	// key-sharing/scripts/gen-tls.sh.
+	CustodianTLS  kmsclient.TLSFiles `json:"custodianTls"`
+	DirectoryFile string             `json:"directoryFile"`
+	StaticDir     string             `json:"staticDir"`
 }
 
 // Default monta a configuração da rede Vagrant a partir do diretório do
@@ -47,7 +52,12 @@ func Default(organizations string) Config {
 			"192.168.56.22:50051",
 			"192.168.56.23:50051",
 		},
-		Threshold:     2,
+		Threshold: 2,
+		CustodianTLS: kmsclient.TLSFiles{
+			CACert: "../key-sharing/build/tls/ca.crt",
+			Cert:   "../key-sharing/build/tls/coordinator.crt",
+			Key:    "../key-sharing/build/tls/coordinator.key",
+		},
 		DirectoryFile: "data/directory.json",
 	}
 	for i := 1; i <= 3; i++ {

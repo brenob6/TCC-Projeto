@@ -19,8 +19,8 @@ que o profissional informado pertence à instituição dessa organização.
 | Figura | Rota | Sequência |
 |---|---|---|
 | 7 | `POST /api/records` | `checkPermission` → chave pública do paciente → cifração (ElGamal + AES-256-GCM) → `ipfs add` → `registerMedicalRecord` |
-| 8 | `POST /api/records/{cid}/access` | `requestRecordAccess` (auditado) → `getAccessAuthorization` → `ipfs cat` + SHA-256 → decifração pelos custodiantes |
-| 9 | `POST /api/records/{cid}/emergency` | `requestEmergencyAccess` → mesma sequência da Figura 8, com justificativa enviada aos custodiantes |
+| 8 | `POST /api/records/{cid}/access` | `requestRecordAccess` (auditado) → `getAccessAuthorization` → `ipfs cat` + SHA-256 → decifração pelos custodiantes, que confirmam o `accessLog` e o SHA-256 do envelope no livro-razão |
+| 9 | `POST /api/records/{cid}/emergency` | `requestEmergencyAccess` → mesma sequência da Figura 8; os custodiantes obtêm a justificativa no livro-razão |
 
 As respostas desses fluxos trazem o campo `trace`, com cada interação entre a
 API e as camadas, exibido pelo frontend.
@@ -69,7 +69,9 @@ sistema de prontuário de cada instituição.
   (`../fabric-network/scripts/start.sh` e
   `../prontuarios-cc/scripts/vagrant/deploy.sh`); a API usa o material
   criptográfico de `../fabric-network/organizations`
-- Custodiantes de chaves (`cd ../key-sharing && ./scripts/build.sh && vagrant up custodian-1 custodian-2 custodian-3`)
+- Custodiantes de chaves no modo `livro-razao`, com o certificado do
+  coordenador em `../key-sharing/build/tls/` (`../key-sharing/scripts/gen-tls.sh`
+  e `../key-sharing/scripts/ledger-config.sh`, executados pelo `start.sh` da raiz)
 
 O `start.sh` da raiz do repositório prepara todo o ambiente e inicia a API.
 
@@ -89,7 +91,8 @@ go run ./cmd/api -static ../frontend/dist         # serve também o frontend com
 
 Os valores padrão correspondem à topologia Vagrant: peers em
 `192.168.56.31-33:7051` (identidade `User1@orgN`), nós IPFS nas mesmas
-máquinas, em `192.168.56.31-33:5001`, e custodiantes em `192.168.56.21-23:50051`, limiar 2-de-3.
+máquinas, em `192.168.56.31-33:5001`, e custodiantes em `192.168.56.21-23:50051`, limiar 2-de-3,
+com TLS mútuo (`custodianTls`: CA e certificado do coordenador em `../key-sharing/build/tls/`).
 
 ## Testes
 
@@ -101,12 +104,18 @@ Os testes usam dublês do ledger, do IPFS e do KMS e cobrem: recusa de escrita
 sem consentimento antes de gravar no IPFS, registro e leitura, leitura negada
 sem acionar IPFS e KMS, rejeição de envelope adulterado, remoção do envelope
 após recusa do chaincode, encaminhamento dos campos assinados, cadastro de
-paciente com geração de chave no KMS e tradução dos erros do chaincode.
+paciente com geração de chave no KMS, tradução dos erros do chaincode, envio
+do `accessLog` e do envelope recuperado do IPFS ao KMS e resposta 403 quando os
+custodiantes recusam a decifração.
 
 ## Limitações da prova de conceito
 
-- A API valida a autorização (`getAccessAuthorization`) antes de acionar os
-  custodiantes; os custodiantes não consultam a blockchain diretamente.
-- O canal com os custodiantes não usa TLS (ver `../key-sharing/README.md`).
+- A API detém as identidades das instituições (`User1@orgN`) e pode, se
+  comprometida, solicitar leituras e acessos extraordinários em nome dos
+  profissionais. Os custodiantes recusam decifrações sem registro no
+  livro-razão, de modo que esse abuso fica registrado, mas não é impedido;
+  impedi-lo exigiria a assinatura do profissional na solicitação de acesso.
+- A API tem acesso ao conteúdo decifrado, pois é ela quem o entrega ao
+  profissional.
 - A API não autentica o usuário do frontend: a escolha da instituição e do
   profissional é feita na interface, para fins de demonstração.

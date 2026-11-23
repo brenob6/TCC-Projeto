@@ -40,7 +40,7 @@ type Storage interface {
 type KeyService interface {
 	GenerateAndDistribute(ctx context.Context, keyID string) ([]byte, error)
 	Encrypt(pubKey, plaintext []byte) (*kmsclient.EncryptedRecord, error)
-	Decrypt(ctx context.Context, keyID string, rec *kmsclient.EncryptedRecord, audit kmsclient.AuditInfo) ([]byte, error)
+	Decrypt(ctx context.Context, keyID string, envelope []byte, audit kmsclient.AuditInfo) ([]byte, error)
 	HealthCheck(ctx context.Context) map[string]string
 	Threshold() int
 	Total() int

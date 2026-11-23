@@ -50,10 +50,15 @@ func main() {
 		storages[org.Name] = ipfs.New(org.IPFSAPI)
 	}
 
+	custodianTLS, err := kmsclient.ClientTLS(cfg.CustodianTLS)
+	if err != nil {
+		log.Fatalf("KMS: %v", err)
+	}
 	keys, err := kmsclient.New(kmsclient.Config{
 		Threshold:  cfg.Threshold,
 		Custodians: cfg.Custodians,
 		Timeout:    10 * time.Second,
+		TLS:        custodianTLS,
 	})
 	if err != nil {
 		log.Fatalf("KMS: %v", err)

@@ -302,24 +302,26 @@ func (s *Server) readRecord(ctx context.Context, org config.Org, cid, profKey, r
 	}
 	trace.add("IPFS", "getDocument", "envelope recuperado pelo nó de %s; SHA-256 confere com o ledger", org.Name)
 
-	var rec kmsclient.EncryptedRecord
-	if err := json.Unmarshal(envelope, &rec); err != nil {
-		return nil, fmt.Errorf("envelope inválido: %w", err)
-	}
-	if auth.Emergency && reason == "" {
-		reason = s.emergencyReason(org.Name, access.AccessLog)
-	}
+	// Os custodiantes confirmam o registro de auditoria no livro-razão, conferem
+	// o resumo do envelope e registram localmente os dados obtidos no
+	// livro-razão; os campos de auditoria abaixo são apenas informativos.
 	inst, _ := s.dir.InstitutionOf(org.Name)
 	prof, _ := s.dir.Professional(profKey)
-	plaintext, err := s.kms.Decrypt(ctx, access.KMSKeyID, &rec, kmsclient.AuditInfo{
+	plaintext, err := s.kms.Decrypt(ctx, access.KMSKeyID, envelope, kmsclient.AuditInfo{
+		AccessLog:     access.AccessLog,
 		RequesterID:   orDefault(prof.ID, profKey),
 		InstitutionID: inst.ID,
 		Emergency:     auth.Emergency,
 		Reason:        reason,
 	})
+	if errors.Is(err, kmsclient.ErrDenied) {
+		trace.add("KMS", "decrypt", "custodiantes recusaram a decifração")
+		return nil, &httpError{status: http.StatusForbidden, message: err.Error()}
+	}
 	if err != nil {
 		return nil, err
 	}
+	trace.add("KMS", "partialDecrypt", "cada custodiante confirmou no livro-razão o registro %s (getAccessAuthorization, uso único) e o SHA-256 do envelope", access.AccessLog)
 	trace.add("KMS", "decrypt", "%d decifrações parciais combinadas (limiar %d-de-%d); chave privada não reconstituída",
 		s.kms.Threshold(), s.kms.Threshold(), s.kms.Total())
 
@@ -329,21 +331,6 @@ func (s *Server) readRecord(ctx context.Context, org config.Org, cid, profKey, r
 	}
 	out["document"] = doc
 	return out, nil
-}
-
-// emergencyReason recupera a justificativa do acesso extraordinário
-// consumido na leitura, exigida pelos custodiantes para a auditoria local.
-func (s *Server) emergencyReason(org, accessLog string) string {
-	logAsset, err := s.readKey(org, accessLog)
-	if err != nil {
-		return "acesso extraordinário"
-	}
-	em, _ := logAsset["emergency"].(map[string]any)
-	emAsset, err := s.readKey(org, str(em["@key"]))
-	if err != nil || str(emAsset["reason"]) == "" {
-		return "acesso extraordinário"
-	}
-	return str(emAsset["reason"])
 }
 
 // invalidateRecord realiza a eliminação lógica assinada pelo paciente e
