@@ -6,6 +6,10 @@
 #
 # Os IPs são incluídos como SANs para que os certificados TLS também sejam
 # válidos quando os nós forem acessados diretamente pelo endereço.
+#
+# Cada organização tem duas identidades cliente: User1, usada pela API
+# Gateway, e User2, usada exclusivamente pelo custodiante de chaves que
+# consulta o peer da organização (key-sharing/scripts/ledger-config.sh).
 
 OrdererOrgs:
   - Name: Orderer
@@ -27,7 +31,7 @@ PeerOrgs:
       - Hostname: peer0
         SANS: ["localhost", "127.0.0.1", "192.168.56.31"]
     Users:
-      Count: 1
+      Count: 2
 
   - Name: Org2
     Domain: org2.example.com
@@ -36,7 +40,7 @@ PeerOrgs:
       - Hostname: peer0
         SANS: ["localhost", "127.0.0.1", "192.168.56.32"]
     Users:
-      Count: 1
+      Count: 2
 
   - Name: Org3
     Domain: org3.example.com
@@ -45,4 +49,4 @@ PeerOrgs:
       - Hostname: peer0
         SANS: ["localhost", "127.0.0.1", "192.168.56.33"]
     Users:
-      Count: 1
+      Count: 2

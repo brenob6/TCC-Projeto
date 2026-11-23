@@ -30,6 +30,14 @@ export PATH=${PWD}/${FABRIC_DIR}/bin:$PATH
 
 if [ -d organizations ]; then
     echo "organizations/ já existe; mantendo o material criptográfico atual."
+    # Redes criadas antes das identidades dos custodiantes (User2) recebem
+    # apenas o que falta: o cryptogen extend reutiliza as CAs existentes e não
+    # altera os certificados já emitidos.
+    if ls organizations/peerOrganizations/*/users | grep -q "^User1@" &&
+       [ "$(ls -d organizations/peerOrganizations/*/users/User2@* 2>/dev/null | wc -l)" -lt 3 ]; then
+        echo "Gerando as identidades cliente dos custodiantes (User2)..."
+        cryptogen extend --config=config/crypto-config.yaml --input=organizations
+    fi
 else
     echo "Gerando o material criptográfico..."
     cryptogen generate --config=config/crypto-config.yaml --output=organizations
